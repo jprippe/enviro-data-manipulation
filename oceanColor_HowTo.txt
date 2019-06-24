@@ -1,0 +1,240 @@
+# Obtaining point location variables from 750m-resolution L2 VIIRS unmapped granule data
+
+# As of 3 Apr 2018, Not all science quality Level-2 data had completed the processing to 
+# full resolution mapped sectors  2012 - complete,  2013:  Jan - July complete, 2014:
+# July - December complete, 2015:  Jan-Mar complete, 2016,2017,2018 less than 3 months
+# complete; all flags and QA values retained in this output
+
+# Written by JP Rippe on 4 Apr 2018
+
+1.	Go to https://coastwatch.noaa.gov/cw_html/cw_polygon_search.html
+2.	Zoom into your region of interest, click the 'Polygon' button on the sidebar, and 
+	draw a polygon surrounding your site locations (double click on final polygon vertex).
+3.	Specify your date range of interest using the calendar menu in the sidebar.
+4.	Click the 'Search' button to find all granule data corresponding to your selected
+	polygon.
+5.	Click the 'FTP List' button to download a text file containing the filenames of all
+	L2 datasets that cover your specified parameters on the CoastWatch FTP server. Move
+	the downloaded FTP list file to a new directory on your computer.
+6.	You should also create a tab-delimited .txt file that includes the geographic 
+	coordinates for all of your site locations that you'd like to extract data for. 
+	NOTE: the file should be formatted with latitude and longitude in the first and 
+	second columns, respectively. Columns can be tab- or space-delimited.
+7.	Because L2 data is unmapped, you will need to map it to a projection file created 
+	using the CoastWatch Master Tool, which can be downloaded here:
+	https://coastwatch.noaa.gov/cw_html/CoastWatchUtilities.html
+8.	Find the NOAA CoastWatch Guidebook document ("Making a custom-mapped product") in the
+	Castillo Lab Drive. Follow the instructions for Steps 1 and 2 to create a master 
+	projection file centered on your region of interest.
+9.	Using the following steps, you'll create three separate bash scripts that will be 
+	used to submit jobs to the Longleaf computing cluster. The first retrieves all of the 
+	netCDF files specified in the FTP list file from the NOAA Coastwatch server, the 
+	second maps the data to a projection file you just created, and the third extracts 
+	from each file only the data corresponding to your sampling sites.
+	
+	Paste each of the following to separate files in your text editor, and save each file
+	with a .sh extension (e.g., OC_joblist.sh). IMPORTANT: Make sure that #!/bin/bash is 
+	on the first line in each file (tells the computer that it is a Bash script and should 
+	be run using the Bash interpreter).
+
+~~~~~~~~~~~~~~~~~~~~~~~   
+~~~~ OC_joblist.sh ~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+
+#!/bin/bash
+
+sbatch --wrap="wget -P data -i FTPlist_aa"
+sbatch --wrap="wget -P data -i FTPlist_ab"
+sbatch --wrap="wget -P data -i FTPlist_ac"
+sbatch --wrap="wget -P data -i FTPlist_ad"
+sbatch --wrap="wget -P data -i FTPlist_ae"
+sbatch --wrap="wget -P data -i FTPlist_af"
+sbatch --wrap="wget -P data -i FTPlist_ag"
+sbatch --wrap="wget -P data -i FTPlist_ah"
+ 
+~~~~~~~~~~~~~~~~~~~  
+~~~~ OC_map.sh ~~~~
+~~~~~~~~~~~~~~~~~~~
+
+#!/bin/bash
+#SBATCH --time=1:00:00
+
+for i in ./data/*.nc*; do
+	i2=$(basename "$i")
+	i3=./mapData/"${i2%.*}"_proj.hdf
+	cwregister --method=mixed --rectsize=16/16 --overwrite=closer --srcfilter=viirs -v <master projection file> "$i" "$i3"
+done
+
+# Make sure to change <master projection file> to the projection file you created.
+# NOTE: If you try to loop this script over a lot of files (>500) in Step 25, it will 
+  likely take more than an hour, so make sure to adjust the #SBATCH --time option as 
+  necessary.
+
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~ OC_extract.sh ~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+
+#!/bin/bash
+#SBATCH --time=1:00:00
+
+for i in `ls -X *_proj.hdf`; do
+	cwsample --samples=<Site locations> "$i" tmp_output.txt
+	cat tmp_output.txt >> real_output.txt
+done
+rm tmp_output.txt
+
+# Make sure to change <Site locations> to the .txt file you generated in Step 6
+# NOTE: If you try to loop this script over a lot of files (>3000) in Step 26, it will 
+  likely take more than an hour, so make sure to adjust the #SBATCH --time option as 
+  necessary.
+
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Now, you'll transition to the Longleaf computing cluster to download and filter all of 
+the L2 granule files. Depending on the size of your polygon and time range, there will 
+likely be thousands of >30MB files, so you don't want to eat up all the memory and storage
+on your desktop.
+
+10.	Open Terminal and navigate (cd function) to the directory on your computer containing 
+	all of the files you created above. Included should be:
+	
+		File description		Example name
+		----------------		------------
+		FTP list file			[L2_wget_list.txt]
+		Site locations			[FL_GPS.txt]
+		Master projection file	[FLKeys_proj.hdf]
+		File retrieval script	[OC_joblist.sh]
+		Mapping script			[OC_map.sh]
+		Site extraction script	[OC_extract.sh]
+		
+11.	Initiate an sftp transfer to your /pine scratch space using the following command:
+   
+	sftp [onyen]@longleaf.unc.edu:/pine/scr/[o]/[n]/[onyen]
+   
+	* Replace [onyen] with your personal onyen and [o] and [n] with the first two letters 
+	  of your onyen
+    
+12.	Enter your password at the prompt, and you should see:
+
+	Connected to longleaf.unc.edu.
+	Changing to: /pine/scr/o/n/onyen
+	sftp> 
+   
+13.	Enter the commands below to transfer the files to the remote working directory (using 
+	whatever names apply to your files):
+
+	put ./L2_wget_list.txt
+	put ./FL_GPS.txt
+	put ./FLKeys_proj.hdf
+	put ./OC_joblist.sh
+	put ./OC_map.sh
+	put ./OC_extract.sh
+   
+	* NOTE: If you are not in the directory containing the FTP list file on your local
+	  computer, you'll need to specify the full path of the file to complete the transfer
+	* Alternatively, you could compress the files into a tarball and transfer all at once 
+	  rather than repeating for each file if that suits your fancy.
+   
+14. Type 'exit' to leave the sftp prompt.
+15. Connect to Longleaf by typing: ssh [your onyen]@longleaf.unc.edu and enter your
+	password at the prompt.
+16. Navigate to your /pine scratch space (cd /pine/scr/[o]/[n]/[onyen]). With the ls 
+	command, you should see all the files that you transferred.
+17. Depending on the number of files specified for download in your FTP list, you might
+	consider splitting it into smaller lists to spread the task over several jobs on the 
+	computing cluster. I typically split every 500 lines to a new file using the 
+	following command:
+	
+	split -l 500 L2_wget_list.txt FTPlist_
+	
+	The final argument ('FTPlist_) specifies the prefix of the output files generated.
+
+18.	You will have to edit your OC_joblist.sh script to reflect the number of list files
+	you now have. For example, the script you created references 8 list files from
+	FTPlist_aa to FTPlist_ah. If you did not split and will simply be using the initial 
+	L2_wget_list.txt file, move on to the next step. If you split it, edit the 
+	OC_joblist.sh script using the vi command. (If you've never used the vi command in 
+	Linux/Unix, make sure to spend some time learning about it online before moving on).
+19. Once you've edited and saved the script to reflect your file list, enter the following
+	command to submit the jobs to SLURM:
+	
+	sbatch ./OC_joblist.sh
+	
+	If you chose not to split the file, you just need to enter the following line to
+	submit your single job:
+	
+	sbatch --wrap="wget -P data -i L2_wget_list.txt"
+	
+	This submits the job to the SLURM scheduler and creates a new directory called 'data' 
+	to store all the downloaded files.
+	
+20.	Now, you'll need to download the CoastWatch Utilities package to your directory using 
+	the following function:
+	
+	wget https://www.star.nesdis.noaa.gov/sod/mecb/coastwatch/cwf/cwutils-3_4_1_554-linux-x86_64.tar.gz
+	
+	* NOTE: If the software has been updated since this document was created, the link 
+	  will need to be changed to the new version. It can be found on the CoastWatch 
+	  Utilities webpage.
+	
+21. Extract the package using: tar -xzf cwutils-3_4_1_554-linux-x86_64.tar.gz
+22. Once extracted, you can delete the tarball from your directory using the rm command.
+23. IMPORTANT: In order for the following functions to work, you first need to add the 
+	installed executable directory to your $PATH environment variable. Otherwise, the
+	commands won't be recognized. To add the path, enter the following command:
+	
+	export PATH=${PATH}:/pine/scr/[o]/[n]/[onyen]/cwutils_3.4.1.554/bin
+	
+	* NOTE: The path will need to be adjusted if the version has changed.
+	
+24.	Create a new directory called 'mapData' (mkdir mapData) that will store all of your
+	mapped data files.
+	
+25. Enter the following command to submit a job that runs the second bash script:
+
+	sbatch ./OC_map.sh
+	
+	This script runs the 'cwregister' command, which is part of the Coastwatch Utility
+	package, on all the .nc files in the /data directory and then adds all output files
+	to the /mapData directory (with a _proj.hdf suffix added to the filename). If you're
+	getting an error or the job isn't running, there are a few likely possibilities: 
+	(1) The file paths do not reflect the location of the input and output directories - 
+	since they are relative paths, the script and data files must be in specific 
+	locations (adjust the OC_map.sh script as necessary), or (2) You haven't added the 
+	correct executable directory to your $PATH environment, so the bash interpreter 
+	doesn't recognize the 'cwregister' command.
+
+26. Enter the following command to submit a job that runs the third bash script:
+
+	sbatch ./OC_extract.sh
+	
+	This script extracts data for each pixel associated with the coordinates of your 
+	sampling sites across the full time record. A temporary file (tmp_output.txt) is 
+	generated and overwritten as it loops through each .hdf file, which is successively 
+	appended to the final output file (real_output.txt).
+
+27. Once you transfer the final output file (real_output.txt) to your local computer, 
+	the order of the data columns is as follows:
+	
+	Latitude
+	Longitude
+	Chlorophyll a concentration
+	Diffuse attenuation coefficient at 490 nm (kd490)
+	Diffuse attenuation coefficient of photosynthetically active radiation (kdPAR)
+	Normalized water-leaving radiance at 410 nm (nLW 410)
+	nLW 443
+	nLW 486
+	nLW 551
+	nLW 671
+	nLW 638
+	Quality assurance (QA) score [Wei et al, 2016]
+	L2 Flags
+	Latitude (satellite navigation)
+	Longitude (satellite navigation)
+
+28. To match the extracted data with associated dates/times of each measurement, you may 
+	also want to create a text file with a list of all the filenames in the directory. 
+	Dates/times can then be subset from each filename string.
+	
+	ls ./mapData/ >list.txt
+	
